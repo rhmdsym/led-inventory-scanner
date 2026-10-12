@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LED Inventory QR Scanner</title>
+<style>
+:root{font-family:Arial,sans-serif;color:#172033;background:#f3f6fb}
+*{box-sizing:border-box}body{margin:0;padding:20px}
+main{max-width:760px;margin:auto;background:white;border:1px solid #dbe3ef;border-radius:16px;padding:22px;box-shadow:0 8px 28px #1720330c}
+h1{font-size:24px;margin:0 0 6px}.muted{color:#64748b;font-size:14px}
+.note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px;margin:16px 0;color:#1d4ed8}
+button{border:0;border-radius:9px;padding:11px 15px;background:#2563eb;color:white;font-weight:bold;cursor:pointer;margin:4px 4px 4px 0}
+button.secondary{background:#e2e8f0;color:#172033}button:disabled{opacity:.5;cursor:not-allowed}
+#reader{width:100%;max-width:520px;margin:16px auto}input{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px;font-size:16px}
+.status{margin-top:12px;padding:12px;background:#f8fafc;border-radius:8px;overflow-wrap:anywhere}
+.scanlog{max-height:230px;overflow:auto;padding-left:20px}.scanlog li{padding:4px 0}
+.row{display:flex;gap:8px;align-items:center}.row input{flex:1}.small{font-size:12px;color:#64748b}
+</style>
+</head>
+<body>
+<main>
+  <h1>Scanner QR — LED Inventory</h1>
+  <div class="muted">Scan QR pada modul LED, box, atau perlengkapan. Saat ditampilkan di aplikasi inventaris, hasil otomatis dikirim ke keranjang tanpa membuka tab baru.</div>
+  <div class="note" id="connectionNote">Menghubungkan ke aplikasi inventory...</div>
+  <div id="reader"></div>
+  <button id="start">Mulai kamera</button>
+  <button id="stop" class="secondary">Hentikan kamera</button>
+  <div class="status" id="status">Siap. Klik Mulai kamera dan izinkan akses kamera.</div>
+  <h3>Input ID manual (cadangan)</h3>
+  <div class="row"><input id="manual" placeholder="Tempel/ketik ID barang, lalu Enter"><button id="sendManual">Kirim</button></div>
+  <p class="small">Jika kamera tetap ditolak oleh browser, Anda masih dapat memasukkan ID secara manual. Untuk kamera HP, buka halaman ini di Chrome/Safari melalui HTTPS dan izinkan kamera.</p>
+  <h3>Riwayat scan pada sesi ini</h3>
+  <ol class="scanlog" id="log"></ol>
+</main>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const targetOrigin = params.get('targetOrigin') || '';
+  const appMode = params.get('app') === 'led-inventory';
+  const $ = id => document.getElementById(id);
+  let scanner = null;
+  let running = false;
+  let lastDecoded = '';
+  let lastAt = 0;
+  const sent = [];
+
+  $('connectionNote').textContent = appMode && targetOrigin
+    ? 'Mode terhubung aktif. Scan akan dikirim ke tab aplikasi inventory.'
+    : 'Halaman berdiri sendiri. Buka melalui tombol dari aplikasi inventory agar hasil scan otomatis dikirim.';
+
+  function setStatus(text, error=false) {
+    $('status').textContent = text;
+    $('status').style.background = error ? '#fee2e2' : '#f8fafc';
+    $('status').style.color = error ? '#991b1b' : '#172033';
+  }
+  function sendId(raw) {
+    const id = String(raw || '').trim();
+    if (!id) return;
+    if (!appMode || !targetOrigin) {
+      setStatus('Scanner belum terhubung ke aplikasi inventory. Tutup tab ini lalu buka scanner dari menu Scan & Keranjang.', true);
+      return;
+    }
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({type:'LED_INVENTORY_QR_SCAN', id:id}, targetOrigin);
+    } else if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({type:'LED_INVENTORY_QR_SCAN', id:id}, targetOrigin);
+    } else {
+      setStatus('Aplikasi inventory tidak terhubung. Muat scanner dari menu Scan & Keranjang.', true);
+      return;
+    }
+    sent.unshift(id);
+    $('log').innerHTML = sent.slice(0,50).map(x => '<li></li>').join('');
+    Array.from($('log').children).forEach((li,i)=>li.textContent=sent[i]);
+    setStatus('ID dikirim ke aplikasi: ' + id);
+  }
+  let scannerLibraryPromise = null;
+  function loadScannerLibrary() {
+    if (window.Html5Qrcode) return Promise.resolve();
+    if (scannerLibraryPromise) return scannerLibraryPromise;
+    scannerLibraryPromise = (async () => {
+      const urls = [
+        'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js',
+        'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'
+      ];
+      for (const src of urls) {
+        try {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = () => { script.remove(); reject(new Error('Gagal memuat '+src)); };
+            document.head.appendChild(script);
+          });
+          if (window.Html5Qrcode) return;
+        } catch (err) {
+          console.warn(err.message);
+        }
+      }
+      scannerLibraryPromise = null;
+      throw new Error('Pustaka pemindai QR tidak dapat dimuat dari CDN.');
+    })();
+    return scannerLibraryPromise;
+  }
+
+  async function startCamera() {
+    if (running) return;
+    try {
+      setStatus('Memuat pustaka pemindai QR...');
+      await loadScannerLibrary();
+    } catch (err) {
+      setStatus(err.message + ' Gunakan input ID manual atau izinkan CDN pada jaringan ini.', true);
+      return;
+    }
+    try {
+      scanner = new Html5Qrcode('reader');
+      running = true;
+      await scanner.start(
+        {facingMode:'environment'},
+        {fps:10, qrbox:{width:250,height:250}, aspectRatio:1},
+        decoded => {
+          const now = Date.now();
+          if (decoded === lastDecoded && now - lastAt < 1800) return;
+          lastDecoded = decoded; lastAt = now;
+          sendId(decoded);
+        },
+        () => {}
+      );
+      setStatus('Kamera aktif. Arahkan ke QR Code barang.');
+      $('start').disabled = true;
+    } catch (err) {
+      running = false; scanner = null;
+      setStatus('Kamera tidak dapat dibuka: ' + (err.message || err) + '. Periksa izin kamera browser dan pastikan halaman HTTPS.', true);
+    }
+  }
+  async function stopCamera() {
+    if (scanner && running) {
+      try { await scanner.stop(); await scanner.clear(); } catch(e) {}
+    }
+    scanner = null; running = false; $('start').disabled = false;
+    setStatus('Kamera dihentikan.');
+  }
+  $('start').addEventListener('click', startCamera);
+  $('stop').addEventListener('click', stopCamera);
+  $('sendManual').addEventListener('click',()=>{sendId($('manual').value);$('manual').value='';});
+  $('manual').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('sendManual').click();}});
+  window.addEventListener('message', e => {
+    if (e.origin !== targetOrigin || !e.data || e.data.type !== 'LED_INVENTORY_STOP_SCANNER') return;
+    stopCamera();
+  });
+})();
+</script>
+</body>
+</html>
