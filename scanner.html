@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LED Inventory QR Scanner</title>
+<title>Asset Management System — QR Scanner</title>
 <style>
 :root{font-family:Arial,sans-serif;color:#172033;background:#f3f6fb}
 *{box-sizing:border-box}body{margin:0;padding:20px}
@@ -20,7 +20,7 @@ button.secondary{background:#e2e8f0;color:#172033}button:disabled{opacity:.5;cur
 </head>
 <body>
 <main>
-  <h1>Scanner QR — LED Inventory</h1>
+  <h1>Scanner QR — Asset Management System</h1>
   <div class="muted">Scan QR pada modul LED, box, atau perlengkapan. Saat ditampilkan di aplikasi inventaris, hasil otomatis dikirim ke keranjang tanpa membuka tab baru.</div>
   <div class="note" id="connectionNote">Menghubungkan ke aplikasi inventory...</div>
   <div id="reader"></div>
@@ -46,7 +46,7 @@ button.secondary{background:#e2e8f0;color:#172033}button:disabled{opacity:.5;cur
   const sent = [];
 
   $('connectionNote').textContent = appMode && targetOrigin
-    ? 'Mode terhubung aktif. Scan akan dikirim ke tab aplikasi inventory.'
+    ? 'Mode terhubung aktif. Scan akan dikirim ke aplikasi inventory yang memuat scanner ini.'
     : 'Halaman berdiri sendiri. Buka melalui tombol dari aplikasi inventory agar hasil scan otomatis dikirim.';
 
   function setStatus(text, error=false) {
@@ -58,7 +58,7 @@ button.secondary{background:#e2e8f0;color:#172033}button:disabled{opacity:.5;cur
     const id = String(raw || '').trim();
     if (!id) return;
     if (!appMode || !targetOrigin) {
-      setStatus('Scanner belum terhubung ke aplikasi inventory. Tutup tab ini lalu buka scanner dari menu Scan & Keranjang.', true);
+      setStatus('Scanner belum terhubung ke aplikasi inventory. Muat scanner dari menu Scan & Keranjang.', true);
       return;
     }
     if (window.parent && window.parent !== window) {
